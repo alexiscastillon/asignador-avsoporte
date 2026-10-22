@@ -4,7 +4,7 @@ from flask import Flask, render_template_string, jsonify, request
 
 app = Flask(__name__)
 
-# --- CREDENCIALES INTEGRADAS ---
+# --- CONFIGURACIÓN JSONBIN ---
 JSONBIN_ID = os.environ.get('JSONBIN_ID', '6ad97155ac6210605a479aae')
 JSONBIN_KEY = os.environ.get('JSONBIN_KEY', '$2a$10$Gy6oKS.5GwyesYEX6azXpehmmHY5ahMdBiwqm7LOQnhYIP3RgpaU2')
 JSONBIN_URL = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
@@ -35,15 +35,14 @@ def obtener_estado_nube():
             if 'tags' not in data: data['tags'] = DEFAULT_TAGS
             return data
     except Exception as e:
-        print("Error consultando JSONBin desde Render:", e)
+        print("Error consultando JSONBin:", e)
     
     return {
         "ultimo_indice": -1,
         "conteo_diario": {p["nombre"]: 0 for p in EQUIPO_AV},
         "conteo_mensual": {p["nombre"]: 0 for p in EQUIPO_AV},
         "fotos": {p["nombre"]: "" for p in EQUIPO_AV},
-        "tags": DEFAULT_TAGS,
-        "log_actividad": ["🟢 Tablero en línea. Esperando ejecuciones de la red local..."]
+        "tags": DEFAULT_TAGS
     }
 
 def guardar_estado_nube(estado):
@@ -51,14 +50,14 @@ def guardar_estado_nube(estado):
     try:
         requests.put(JSONBIN_URL, json=estado, headers=headers, timeout=5)
     except Exception as e:
-        print("Error al guardar en JSONBin desde Render:", e)
+        print("Error al guardar en JSONBin:", e)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>AV-Soporte | Tablero de Control</title>
+    <title>AV-Soporte | Tablero Métrica</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -70,17 +69,30 @@ HTML_TEMPLATE = """
     <div class="max-w-6xl mx-auto space-y-6">
         
         <div class="text-center space-y-2">
-            <h1 class="text-3xl font-extrabold text-[#7c2d12]">🤖 Asignador Automático AV-Soporte</h1>
+            <h1 class="text-3xl font-extrabold text-[#7c2d12]">🤖 Tablero Métricas AV-Soporte</h1>
             <p class="text-sm text-[#9a3412] font-semibold">Lunes a Viernes de 09:00 a 18:00 hs | Frecuencia: Cada 1 minuto</p>
-            <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full uppercase tracking-wider border border-emerald-300">
-                🟢 TABLERO EN TIEMPO REAL
-            </span>
+            <div class="flex items-center justify-center gap-3 pt-1">
+                <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full uppercase tracking-wider border border-emerald-300">
+                    🟢 TABLERO EN TIEMPO REAL
+                </span>
+                <button onclick="reiniciarContadores()" class="px-3 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 font-extrabold text-xs rounded-full border border-amber-400 transition flex items-center gap-1 shadow-sm">
+                    🔄 REINICIAR CONTADORES
+                </button>
+            </div>
         </div>
 
         <!-- Tarjetas del Equipo -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             {% for p in integrantes %}
-            <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow text-center relative flex flex-col items-center">
+            {% set es_ultimo = (loop.index0 == estado.ultimo_indice) %}
+            <div class="bg-white p-6 rounded-2xl border {{ 'border-emerald-400 ring-2 ring-emerald-300' if es_ultimo else 'border-amber-100' }} card-shadow text-center relative flex flex-col items-center transition-all">
+                
+                {% if es_ultimo %}
+                <span class="absolute -top-3 bg-emerald-500 text-white text-[10px] font-extrabold px-3 py-0.5 rounded-full uppercase tracking-wider shadow">
+                    Último Asignado
+                </span>
+                {% endif %}
+
                 <div class="relative group cursor-pointer mb-3" onclick="triggerFoto('{{ p.nombre }}')">
                     <img id="img-{{ loop.index0 }}" src="{{ estado.fotos.get(p.nombre) or '' }}" 
                          class="w-24 h-24 rounded-full object-cover border-4 border-amber-400 bg-amber-50 flex items-center justify-center font-bold text-2xl text-amber-800 {{ 'hidden' if not estado.fotos.get(p.nombre) else '' }}">
@@ -108,24 +120,7 @@ HTML_TEMPLATE = """
             {% endfor %}
         </div>
 
-        <!-- Botón de Simulación -->
-        <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex items-center justify-center gap-4">
-            <button onclick="simularAsignacion()" class="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-extrabold rounded-xl transition text-sm shadow-md">
-                🧪 PROBAR SIMULACIÓN
-            </button>
-        </div>
-
-        <!-- Terminal de Logs -->
-        <div class="bg-slate-900 rounded-2xl p-4 font-mono text-xs text-amber-400 h-48 overflow-y-auto border border-slate-800 shadow-inner">
-            <div class="text-slate-500 mb-2 border-b border-slate-800 pb-1">⚡ Monitoreo de Asignación en Tiempo Real (Desde la Intranet AGIP)</div>
-            <div id="terminal-logs" class="space-y-1">
-                {% for log in estado.log_actividad %}
-                <div>{{ log }}</div>
-                {% endfor %}
-            </div>
-        </div>
-
-        <!-- Tags Categoría -->
+        <!-- Tags Cierre de Incidentes -->
         <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow space-y-6">
             <h2 class="text-lg font-extrabold text-slate-800">🏷️ Tags Cierre de Incidentes (Haz clic para copiar)</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="tags-container"></div>
@@ -196,10 +191,11 @@ HTML_TEMPLATE = """
             reader.readAsDataURL(file);
         }
 
-        async function simularAsignacion() {
-            const res = await fetch('/api/simular', { method: 'POST' });
-            const data = await res.json();
-            alert(`🧪 SIMULACIÓN:\nEl próximo ticket le correspondería a: ${data.siguiente}`);
+        async function reiniciarContadores() {
+            if (confirm("¿Estás seguro de que deseas reiniciar todos los contadores a 0 / 0?")) {
+                await fetch('/api/reiniciar_contadores', { method: 'POST' });
+                location.reload();
+            }
         }
 
         renderTags();
@@ -229,11 +225,13 @@ def api_guardar_tags():
     guardar_estado_nube(estado)
     return jsonify({"success": True})
 
-@app.route('/api/simular', methods=['POST'])
-def api_simular():
+@app.route('/api/reiniciar_contadores', methods=['POST'])
+def api_reiniciar_contadores():
     estado = obtener_estado_nube()
-    siguiente_idx = (estado.get('ultimo_indice', -1) + 1) % len(EQUIPO_AV)
-    return jsonify({"siguiente": EQUIPO_AV[siguiente_idx]['nombre']})
+    estado['conteo_diario'] = {p["nombre"]: 0 for p in EQUIPO_AV}
+    estado['conteo_mensual'] = {p["nombre"]: 0 for p in EQUIPO_AV}
+    guardar_estado_nube(estado)
+    return jsonify({"success": True})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
