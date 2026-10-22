@@ -1,12 +1,8 @@
 import os
 import json
-import time
 import requests
 from datetime import datetime
-from flask import Flask, render_template_string, jsonify, send_file, request
-import io
-import pandas as pd
-from redminelib import Redmine
+from flask import Flask, render_template_string, jsonify, request
 
 app = Flask(__name__)
 
@@ -20,7 +16,7 @@ JSONBIN_ID = os.environ.get('JSONBIN_ID', '')
 JSONBIN_KEY = os.environ.get('JSONBIN_KEY', '')
 JSONBIN_URL = f'https://api.jsonbin.io/v3/b/{JSONBIN_ID}' if JSONBIN_ID else None
 
-# Integrantes
+# Integrantes (Sin IDs visibles en la interfaz)
 INTEGRANTES = [
     {"nombre": "Alexis Castillon", "id": 458, "alias": "el alexis"},
     {"nombre": "Marien Gricel", "id": 232, "alias": "la gricel"},
@@ -102,7 +98,7 @@ HTML_TEMPLATE = """
             </span>
         </div>
 
-        <!-- Tarjetas Equipo -->
+        <!-- Tarjetas Equipo (Sin IDs) -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             {% for p in integrantes %}
             <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow text-center relative flex flex-col items-center">
@@ -135,12 +131,8 @@ HTML_TEMPLATE = """
             {% endfor %}
         </div>
 
-        <!-- Acciones principales -->
-        <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex flex-wrap items-center justify-center gap-4">
-            <a href="/reporte?tipo=diario" class="px-5 py-3 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold rounded-xl transition text-sm">
-                📊 REPORTE DEL DIA
-            </a>
-            
+        <!-- Acciones Principales (Sin botones de reporte) -->
+        <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex items-center justify-center gap-4">
             <button onclick="simularAsignacion()" class="px-5 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl transition text-sm shadow-md">
                 🧪 SIMULACIÓN
             </button>
@@ -148,13 +140,9 @@ HTML_TEMPLATE = """
             <button onclick="ejecutarAsignacion()" class="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded-xl transition text-base shadow-lg hover:shadow-amber-200">
                 🚀 ASIGNAR TICKETS
             </button>
-
-            <a href="/reporte?tipo=mensual" class="px-5 py-3 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold rounded-xl transition text-sm">
-                📈 REPORTE MENSUAL
-            </a>
         </div>
 
-        <!-- Terminal Terminal Log -->
+        <!-- Terminal Log -->
         <div class="bg-slate-900 rounded-2xl p-4 font-mono text-xs text-amber-400 h-48 overflow-y-auto border border-slate-800 shadow-inner">
             <div class="text-slate-500 mb-2 border-b border-slate-800 pb-1">⚡ Monitoreo de Asignación en Tiempo Real (Detrás de escena)</div>
             <div id="terminal-logs" class="space-y-1">
@@ -171,7 +159,7 @@ HTML_TEMPLATE = """
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="tags-container">
-                <!-- Se llena mediante Javascript -->
+                <!-- Se llena dinámicamente con JS -->
             </div>
         </div>
 
@@ -296,20 +284,6 @@ def api_simular():
     siguiente_idx = (estado['ultimo_indice'] + 1) % len(INTEGRANTES)
     siguiente_persona = INTEGRANTES[siguiente_idx]['nombre']
     return jsonify({"siguiente": siguiente_persona})
-
-@app.route('/reporte')
-def reporte():
-    tipo = request.args.get('tipo', 'diario')
-    estado = obtener_estado()
-    df = pd.DataFrame([
-        {"Integrante": p["nombre"], "Tickets Asignados": estado['conteo_diario'].get(p["nombre"], 0) if tipo == 'diario' else estado['conteo_mensual'].get(p["nombre"], 0)}
-        for p in INTEGRANTES
-    ])
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Reporte')
-    output.seek(0)
-    return send_file(output, download_name=f'reporte_{tipo}.xlsx', as_attachment=True)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
