@@ -1,390 +1,315 @@
 import os
-import time
 import json
+import time
 import requests
 from datetime import datetime
-from threading import Thread
-from flask import Flask, render_template_string, jsonify, request
+from flask import Flask, render_template_string, jsonify, send_file, request
+import io
+import pandas as pd
 from redminelib import Redmine
 
 app = Flask(__name__)
 
-# --- CONFIGURACIÓN DE REDMINE Y JSONBIN (NUBE) ---
-URL_REDMINE = 'https://redmine.agip.gob.ar/'
-MI_API_KEY = '5c5a1ada0bb1066b69ae6b78a8fe7a135701ab7f'
-PROJECT_SLUG = 'soporte'
+# Configuración de Redmine
+REDMINE_URL = 'https://sistemas.agip.gob.ar/redmine/'
+REDMINE_API_KEY = os.environ.get('REDMINE_API_KEY', 'TU_API_KEY_AQUI')
+GROUP_ID = 237  # ID AV-Soporte
 
-JSONBIN_ID = os.environ.get('JSONBIN_ID', '65a12345demo') # Reemplazar con tu BIN ID
-JSONBIN_KEY = os.environ.get('JSONBIN_KEY', '$2a$10$demoKey') # Reemplazar con tu Master Key
-JSONBIN_URL = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
+# JSONBin Config
+JSONBIN_ID = os.environ.get('JSONBIN_ID', '')
+JSONBIN_KEY = os.environ.get('JSONBIN_KEY', '')
+JSONBIN_URL = f'https://api.jsonbin.io/v3/b/{JSONBIN_ID}' if JSONBIN_ID else None
 
-EQUIPO_AV = [
-    {"nombre": "Alexis Castillon", "id": 458},
-    {"nombre": "Marien Gricel", "id": 232},
-    {"nombre": "De Yullis Nicolas", "id": 306}
+# Integrantes
+INTEGRANTES = [
+    {"nombre": "Alexis Castillon", "id": 458, "alias": "el alexis"},
+    {"nombre": "Marien Gricel", "id": 232, "alias": "la gricel"},
+    {"nombre": "De Yullis Nicolas", "id": 306, "alias": "el nico"}
 ]
 
-ejecutando_robot = False
+DEFAULT_TAGS = {
+    "ARCIBA": ["-C:Arciba-Pagos", "-C:Arciba-PagosInt.Resarcitorio/Retardo", "-C:Arciba-DDJJ", "-C:Arciba-PFP-Plan-C.A", "-C:Arciba-Mal-Escalado"],
+    "AUTOMOTOR": ["-C:Automotor-PFP-Pagos", "-C:Automotor-PFP-Plan", "-C:Automotor-Padron", "-C:Automotor-PFP-Plan-C.A", "-C:Automotor-Mal-Escalado"],
+    "ABL": ["-C:ABL-Padron", "-C:ABL-PFP-Pagos", "-C:ABL-PFP-Plan", "-C:ABL-PFP-Plan-C.A", "-C:ABL-Mal-Escalado"],
+    "CONVENIO MULTILATERAL (CM)": ["-C:CM-PFP-Pagos", "-C:CM-Pagos", "-C:CM-DDJJ", "-C:CM-CompensacionesAutomáticas", "-C:CM-PFP-Plan", "-C:CM-PFP-Plan-C.A", "-C:CM-Mal-Escalado", "-C:CM-DevoluciónSAF", "-C:CM-Padron-Update"],
+    "CONTRIBUYENTES LOCALES (CL)": ["-C:CL-PFP-Pagos", "-C:CL-CuentaCorriente", "-C:CL-CompensacionesAutomáticas", "-C:CL-Pagos", "-C:CL-PFP-Plan", "-C:CL-PFP-Plan-C.A", "-C:CL-Mal-Escalado"],
+    "REGIMEN SIMPLIFICADO (RS)": ["-C:RS-CuentaCorriente", "-C:RS-PFP-Pagos", "-C:RS-PFP-Plan", "-C:RS-PFP-Plan-C.A", "-C:RS-Mal-Escalado"],
+    "SELLOS": ["-C:SELLOS-Pagos", "-C:SELLOS-PFP-Plan", "-C:SELLOS-PFP-Pagos", "-C:SELLOS-Mal-Escalado"]
+}
 
-def obtener_estado_nube():
-    try:
-        res = requests.get(f"{JSONBIN_URL}/latest", headers={'X-Master-Key': JSONBIN_KEY}, timeout=5)
-        return res.json()['record']
-    except Exception:
-        return {
-            "ultimo_indice": -1,
-            "conteo_diario": {"Alexis Castillon": 0, "Marien Gricel": 0, "De Yullis Nicolas": 0},
-            "conteo_mensual": {"Alexis Castillon": 0, "Marien Gricel": 0, "De Yullis Nicolas": 0},
-            "mes_operacion": datetime.now().strftime("%Y-%m"),
-            "log_actividad": []
-        }
+estado_local = {
+    "ultimo_indice": -1,
+    "conteo_diario": {p["nombre"]: 0 for p in INTEGRANTES},
+    "conteo_mensual": {p["nombre"]: 0 for p in INTEGRANTES},
+    "fotos": {p["nombre"]: "" for p in INTEGRANTES},
+    "tags": DEFAULT_TAGS,
+    "mes_operacion": datetime.now().strftime("%Y-%m"),
+    "log_actividad": []
+}
 
-def guardar_estado_nube(estado):
+def obtener_estado():
+    if not JSONBIN_URL or not JSONBIN_KEY:
+        return estado_local
+    headers = {'X-Master-Key': JSONBIN_KEY}
     try:
-        requests.put(JSONBIN_URL, json=estado, headers={
-            'Content-Type': 'application/json',
-            'X-Master-Key': JSONBIN_KEY
-        }, timeout=5)
+        r = requests.get(JSONBIN_URL, headers=headers, timeout=5)
+        if r.status_code == 200:
+            data = r.json()['record']
+            if 'fotos' not in data: data['fotos'] = {p["nombre"]: "" for p in INTEGRANTES}
+            if 'tags' not in data: data['tags'] = DEFAULT_TAGS
+            return data
     except Exception as e:
-        print(f"Error al guardar en JSONBin: {e}")
+        print("Error JSONBin get:", e)
+    return estado_local
 
-def registrar_log(estado, mensaje):
-    hora = datetime.now().strftime("%H:%M:%S")
-    log_entry = f"[{hora}] {mensaje}"
-    print(log_entry)
-    estado.setdefault("log_actividad", [])
-    estado["log_actividad"].insert(0, log_entry)
-    # Limitar el historial en vivo a 50 líneas para optimizar memoria
-    if len(estado["log_actividad"]) > 50:
-        estado["log_actividad"].pop()
-
-def verificar_limpieza_mensual(estado):
-    mes_actual = datetime.now().strftime("%Y-%m")
-    if estado.get("mes_operacion") != mes_actual:
-        registrar_log(estado, f"🧹 CAMBIO DE MES DETECTADO ({mes_actual}): Reiniciando contadores a 0...")
-        estado["conteo_mensual"] = {"Alexis Castillon": 0, "Marien Gricel": 0, "De Yullis Nicolas": 0}
-        estado["conteo_diario"] = {"Alexis Castillon": 0, "Marien Gricel": 0, "De Yullis Nicolas": 0}
-        estado["log_actividad"] = [f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Nuevo mes iniciado ({mes_actual})."]
-        estado["mes_operacion"] = mes_actual
-        guardar_estado_nube(estado)
-
-def es_horario_permitido():
-    ahora = datetime.now()
-    dia = ahora.weekday() # 0 = Lunes, 4 = Viernes
-    hora = ahora.hour
-    return (0 <= dia <= 4) and (9 <= hora < 18)
-
-def ciclo_asignacion_redmine():
-    global ejecutando_robot
-    estado = obtener_estado_nube()
-    verificar_limpieza_mensual(estado)
-
-    if not es_horario_permitido():
-        ejecutando_robot = False
-        registrar_log(estado, "⏰ FUERA DE HORARIO (09:00 - 18:00 hs Lun-Vie). Asignador pausado.")
-        guardar_estado_nube(estado)
+def guardar_estado(data):
+    global estado_local
+    estado_local = data
+    if not JSONBIN_URL or not JSONBIN_KEY:
         return
-
+    headers = {'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY}
     try:
-        redmine = Redmine(URL_REDMINE, key=MI_API_KEY)
-        todos_nuevos = list(redmine.issue.filter(
-            project_id=PROJECT_SLUG,
-            status_id='1',
-            sort='created_on:asc'
-        ))
-
-        # Filtro estricto: Solo cola AV-Soporte sin persona asignada individualmente
-        pendientes = [
-            i for i in todos_nuevos 
-            if hasattr(i, 'assigned_to') and i.assigned_to.name == 'AV-Soporte'
-        ]
-
-        if not pendientes:
-            registrar_log(estado, "🔍 Revisión: Sin tickets pendientes en cola 'AV-Soporte'.")
-            guardar_estado_nube(estado)
-            return
-
-        registrar_log(estado, f"⚡ Se encontraron {len(pendientes)} ticket(s) pendientes. Procesando...")
-
-        for issue in pendientes:
-            asunto_actual = issue.subject
-            asunto_nuevo = asunto_actual if asunto_actual.startswith('-AV-S-') else f"-AV-S-{asunto_actual}"
-
-            siguiente_idx = (estado["ultimo_indice"] + 1) % len(EQUIPO_AV)
-            usr_destino = EQUIPO_AV[siguiente_idx]
-
-            params = {'assigned_to_id': usr_destino["id"]}
-            if asunto_nuevo != asunto_actual:
-                params['subject'] = asunto_nuevo
-
-            redmine.issue.update(issue.id, **params)
-
-            estado["ultimo_indice"] = siguiente_idx
-            estado["conteo_diario"][usr_destino["nombre"]] = estado["conteo_diario"].get(usr_destino["nombre"], 0) + 1
-            estado["conteo_mensual"][usr_destino["nombre"]] = estado["conteo_mensual"].get(usr_destino["nombre"], 0) + 1
-
-            registrar_log(estado, f"✅ Ticket #{issue.id} -> Asignado a {usr_destino['nombre']} (Asunto: '{asunto_nuevo}')")
-
-        guardar_estado_nube(estado)
-
+        requests.put(JSONBIN_URL, json=data, headers=headers, timeout=5)
     except Exception as e:
-        registrar_log(estado, f"❌ Error en Redmine: {e}")
-        guardar_estado_nube(estado)
+        print("Error JSONBin put:", e)
 
-def temporizador_1minuto():
-    while True:
-        if ejecutando_robot:
-            ciclo_asignacion_redmine()
-        time.sleep(60) # Ejecución continua cada 1 minuto
-
-# --- INTERFAZ WEB HTML / TAILWIND ---
-HTML_LAYOUT = """
+HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AV-Soporte | Asignador Automatizado</title>
+    <title>Asignador Automático AV-Soporte</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { background-color: #fdfbf7; color: #2d3748; }
-        .card-warm { background: #ffffff; border: 1px solid #f1e9d9; box-shadow: 0 4px 15px rgba(217, 119, 6, 0.05); }
-        .terminal-box { background: #1e1e1e; color: #4ade80; font-family: monospace; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #faf8f5; color: #2d2b2a; }
+        .card-shadow { box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01); }
     </style>
 </head>
-<body class="p-4 md:p-8 min-h-screen">
-
-    <div class="max-w-5xl mx-auto space-y-6">
+<body class="p-4 md:p-8">
+    <div class="max-w-6xl mx-auto space-y-6">
         
-        <!-- ENCABEZADO Y HORARIO -->
-        <header class="text-center space-y-1">
-            <h1 class="text-3xl font-extrabold text-amber-900">🤖 Asignador Automático AV-Soporte</h1>
-            <p class="text-sm text-amber-700 font-medium">Lunes a Viernes de 09:00 a 18:00 hs | Frecuencia: Cada 1 minuto</p>
-            <div id="status-pill" class="inline-block px-4 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                Cargando estado...
-            </div>
-        </header>
+        <!-- Header -->
+        <div class="text-center space-y-2">
+            <h1 class="text-3xl font-extrabold text-[#7c2d12] flex items-center justify-center gap-2">
+                🤖 Asignador Automático AV-Soporte
+            </h1>
+            <p class="text-sm text-[#9a3412] font-semibold">
+                Lunes a Viernes de 09:00 a 18:00 hs | Frecuencia: Cada 1 minuto
+            </p>
+            <span id="status-badge" class="inline-block px-3 py-1 bg-red-100 text-red-700 font-bold text-xs rounded-full uppercase tracking-wider">
+                ● ASIGNADOR PAUSADO
+            </span>
+        </div>
 
-        <!-- TARJETAS DE INTEGRANTES -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <div class="card-warm rounded-2xl p-5 text-center relative">
-                <img id="img-0" src="https://ui-avatars.com/api/?name=Alexis+Castillon&background=d97706&color=fff&size=128" class="w-24 h-24 rounded-full mx-auto mb-3 border-4 border-amber-400 shadow">
-                <h2 id="name-0" class="text-lg font-bold text-gray-800">el alesi</h2>
-                <span class="text-xs text-amber-600 block">ID: 458</span>
-                <div class="mt-3 bg-amber-50 p-2 rounded-xl border border-amber-200">
-                    <span class="text-xs text-amber-800 block">Hoy / Mes</span>
-                    <span id="cnt-0" class="text-xl font-black text-amber-900">0 / 0</span>
+        <!-- Tarjetas Equipo -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {% for p in integrantes %}
+            <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow text-center relative flex flex-col items-center">
+                
+                <!-- Foto Editable -->
+                <div class="relative group cursor-pointer mb-3" onclick="triggerFoto('{{ p.nombre }}')">
+                    <img id="img-{{ loop.index0 }}" src="{{ estado.fotos.get(p.nombre) or '' }}" 
+                         class="w-24 h-24 rounded-full object-cover border-4 border-amber-400 bg-amber-50 flex items-center justify-center font-bold text-2xl text-amber-800 {{ 'hidden' if not estado.fotos.get(p.nombre) else '' }}">
+                    
+                    <div id="avatar-{{ loop.index0 }}" class="w-24 h-24 rounded-full border-4 border-amber-400 bg-amber-500 text-white flex items-center justify-center font-bold text-2xl uppercase {{ 'hidden' if estado.fotos.get(p.nombre) else '' }}">
+                        {{ p.nombre[:2] }}
+                    </div>
+
+                    <div class="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition-opacity">
+                        📷 Cambiar
+                    </div>
+                </div>
+                <input type="file" id="file-{{ p.nombre }}" class="hidden" accept="image/*" onchange="subirFoto(event, '{{ p.nombre }}')">
+
+                <h3 class="font-bold text-lg text-slate-800 mb-1">{{ p.alias }}</h3>
+                <p class="text-xs text-slate-400 font-medium mb-3">{{ p.nombre }}</p>
+
+                <div class="w-full bg-amber-50/60 rounded-xl p-3 border border-amber-100 mt-auto">
+                    <span class="text-xs text-amber-800/60 font-semibold block uppercase">Hoy / Mes</span>
+                    <span id="count-{{ p.nombre }}" class="text-2xl font-extrabold text-amber-900">
+                        {{ estado.conteo_diario.get(p.nombre, 0) }} / {{ estado.conteo_mensual.get(p.nombre, 0) }}
+                    </span>
                 </div>
             </div>
+            {% endfor %}
+        </div>
 
-            <div class="card-warm rounded-2xl p-5 text-center relative">
-                <img id="img-1" src="https://ui-avatars.com/api/?name=Marien+Gricel&background=059669&color=fff&size=128" class="w-24 h-24 rounded-full mx-auto mb-3 border-4 border-emerald-400 shadow">
-                <h2 id="name-1" class="text-lg font-bold text-gray-800">la gricel</h2>
-                <span class="text-xs text-emerald-600 block">ID: 232</span>
-                <div class="mt-3 bg-emerald-50 p-2 rounded-xl border border-emerald-200">
-                    <span class="text-xs text-emerald-800 block">Hoy / Mes</span>
-                    <span id="cnt-1" class="text-xl font-black text-emerald-900">0 / 0</span>
-                </div>
-            </div>
+        <!-- Acciones principales -->
+        <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex flex-wrap items-center justify-center gap-4">
+            <a href="/reporte?tipo=diario" class="px-5 py-3 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold rounded-xl transition text-sm">
+                📊 REPORTE DEL DIA
+            </a>
+            
+            <button onclick="simularAsignacion()" class="px-5 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl transition text-sm shadow-md">
+                🧪 SIMULACIÓN
+            </button>
 
-            <div class="card-warm rounded-2xl p-5 text-center relative">
-                <img id="img-2" src="https://ui-avatars.com/api/?name=Nicolas+De+Yullis&background=2563eb&color=fff&size=128" class="w-24 h-24 rounded-full mx-auto mb-3 border-4 border-blue-400 shadow">
-                <h2 id="name-2" class="text-lg font-bold text-gray-800">el nico</h2>
-                <span class="text-xs text-blue-600 block">ID: 306</span>
-                <div class="mt-3 bg-blue-50 p-2 rounded-xl border border-blue-200">
-                    <span class="text-xs text-blue-800 block">Hoy / Mes</span>
-                    <span id="cnt-2" class="text-xl font-black text-blue-900">0 / 0</span>
-                </div>
+            <button onclick="ejecutarAsignacion()" class="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded-xl transition text-base shadow-lg hover:shadow-amber-200">
+                🚀 ASIGNAR TICKETS
+            </button>
+
+            <a href="/reporte?tipo=mensual" class="px-5 py-3 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold rounded-xl transition text-sm">
+                📈 REPORTE MENSUAL
+            </a>
+        </div>
+
+        <!-- Terminal Terminal Log -->
+        <div class="bg-slate-900 rounded-2xl p-4 font-mono text-xs text-amber-400 h-48 overflow-y-auto border border-slate-800 shadow-inner">
+            <div class="text-slate-500 mb-2 border-b border-slate-800 pb-1">⚡ Monitoreo de Asignación en Tiempo Real (Detrás de escena)</div>
+            <div id="terminal-logs" class="space-y-1">
+                {% for log in estado.log_actividad %}
+                <div>{{ log }}</div>
+                {% endfor %}
             </div>
         </div>
 
-        <!-- PANEL CENTRAL Y BOTONES DE CONTROL -->
-        <div class="card-warm rounded-2xl p-6 text-center space-y-4">
-            <div class="flex flex-wrap justify-center gap-4">
-                <button onclick="verReporte('diario')" class="bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold px-5 py-3 rounded-xl border border-amber-300 transition">
-                    📊 REPORTE DEL DIA
-                </button>
+        <!-- Tags Categoría -->
+        <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow space-y-6">
+            <h2 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
+                🏷️ Tags Cierre de Incidentes por Categoría (Haz clic para copiar)
+            </h2>
 
-                <button id="btn-toggle" onclick="toggleRobot()" class="bg-amber-500 hover:bg-amber-600 text-white text-xl font-black px-8 py-4 rounded-2xl shadow-lg border border-amber-400 transition transform active:scale-95">
-                    🚀 ASIGNAR TICKETS
-                </button>
-
-                <button onclick="verReporte('mensual')" class="bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold px-5 py-3 rounded-xl border border-amber-300 transition">
-                    📈 REPORTE MENSUAL
-                </button>
-            </div>
-
-            <div>
-                <button onclick="detenerRobot()" class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-5 py-2 rounded-lg shadow transition">
-                    🛑 DETENER ASIGNADOR
-                </button>
-            </div>
-        </div>
-
-        <!-- CONSOLA / LOG EN TIEMPO REAL -->
-        <div class="card-warm rounded-2xl p-5 space-y-2">
-            <h3 class="font-bold text-amber-900 text-sm flex items-center gap-2">
-                <span>⚡ Monitoreo de Asignación en Tiempo Real (Detrás de escena)</span>
-            </h3>
-            <div id="terminal-log" class="terminal-box h-48 rounded-xl p-3 text-xs overflow-y-auto space-y-1">
-                <div>Cargando terminal...</div>
-            </div>
-        </div>
-
-        <!-- TAGS CIERRE DE INCIDENTES -->
-        <div class="card-warm rounded-2xl p-6 space-y-4">
-            <h2 class="text-lg font-bold text-amber-900 border-b pb-2">🏷️ Tags Cierre de Incidentes por Categoría (Haz clic para copiar)</h2>
-            <div id="tags-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-        </div>
-
-        <!-- GENERADOR DE REPORTES EXCEL -->
-        <div class="card-warm rounded-2xl p-6 space-y-4">
-            <h2 class="text-lg font-bold text-amber-900">📑 Generador de Reportes de Cierre (Excel)</h2>
-            <div class="flex flex-wrap items-center gap-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-600 mb-1">Desde</label>
-                    <input type="date" id="date-from" class="border rounded-lg px-3 py-2 text-sm">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-gray-600 mb-1">Hasta</label>
-                    <input type="date" id="date-to" class="border rounded-lg px-3 py-2 text-sm">
-                </div>
-                <button onclick="exportarExcel()" class="mt-5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-2.5 rounded-xl shadow transition">
-                    📥 DESCARGAR REPORTE EXCEL (XLSX)
-                </button>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="tags-container">
+                <!-- Se llena mediante Javascript -->
             </div>
         </div>
 
     </div>
 
     <script>
-        const tagsData = {
-            "ARCIBA": ["-C:Arciba-Pagos", "-C:Arciba-PagosInt.Resarcitorio/Retardo", "-C:Arciba-DDJJ", "-C:Arciba-PFP-Plan-C.A", "-C:Arciba-Mal-Escalado"],
-            "AUTOMOTOR": ["-C:Automotor-PFP-Pagos", "-C:Automotor-PFP-Plan", "-C:Automotor-Padron", "-C:Automotor-PFP-Plan-C.A", "-C:Automotor-Mal-Escalado"],
-            "ABL": ["-C:ABL-Padron", "-C:ABL-PFP-Pagos", "-C:ABL-PFP-Plan", "-C:ABL-PFP-Plan-C.A", "-C:ABL-Mal-Escalado"],
-            "CONVENIO MULTILATERAL (CM)": ["-C:CM-PFP-Pagos", "-C:CM-Pagos", "-C:CM-DDJJ", "-C:CM-CompensacionesAutomáticas", "-C:CM-PFP-Plan", "-C:CM-PFP-Plan-C.A", "-C:CM-Mal-Escalado", "-C:CM-DevoluciónSAF", "-C:CM-Padron-Update"],
-            "CONTRIBUYENTES LOCALES (CL)": ["-C:CL-PFP-Pagos", "-C:CL-CuentaCorriente", "-C:CL-CompensacionesAutomáticas", "-C:CL-Pagos", "-C:CL-PFP-Plan", "-C:CL-PFP-Plan-C.A", "-C:CL-Mal-Escalado"],
-            "REGIMEN SIMPLIFICADO (RS)": ["-C:RS-CuentaCorriente", "-C:RS-PFP-Pagos", "-C:RS-PFP-Plan", "-C:RS-PFP-Plan-C.A", "-C:RS-Mal-Escalado"],
-            "SELLOS": ["-C:SELLOS-Pagos", "-C:SELLOS-PFP-Plan", "-C:SELLOS-PFP-Pagos", "-C:SELLOS-Mal-Escalado"]
-        };
+        let tagsData = {{ estado.tags | tojson }};
 
         function renderTags() {
-            const grid = document.getElementById('tags-grid');
-            grid.innerHTML = '';
+            const container = document.getElementById('tags-container');
+            container.innerHTML = '';
+
             for (const [cat, tags] of Object.entries(tagsData)) {
-                const box = document.createElement('div');
-                box.className = 'bg-amber-50/50 border border-amber-200 rounded-xl p-4';
-                box.innerHTML = `
-                    <h4 class="font-bold text-amber-900 text-xs mb-2">${cat}</h4>
-                    <div class="flex flex-wrap gap-1.5 mb-2">
-                        ${tags.map(t => `<button onclick="copiarTag('${t}')" class="bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-[11px] px-2 py-1 rounded font-mono transition shadow-sm">${t}</button>`).join('')}
+                let tagsHTML = tags.map(t => `
+                    <button onclick="copiarTag(this, '${t}')" class="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-semibold rounded-lg transition text-left flex items-center gap-1.5">
+                        <span>${t}</span>
+                        <span class="check-icon hidden text-emerald-600 font-bold">✅</span>
+                    </button>
+                `).join('');
+
+                container.innerHTML += `
+                    <div class="border border-amber-100 rounded-xl p-4 bg-amber-50/20 space-y-3">
+                        <div class="flex justify-between items-center">
+                            <h3 class="font-extrabold text-xs text-amber-900 uppercase tracking-wider">${cat}</h3>
+                            <button onclick="agregarNuevoTag('${cat}')" class="text-xs font-bold text-amber-600 hover:text-amber-800 hover:underline">
+                                + Agregar Tag
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            ${tagsHTML}
+                        </div>
                     </div>
                 `;
-                grid.appendChild(box);
             }
         }
 
-        function copiarTag(tag) {
-            navigator.clipboard.writeText(tag);
-            alert(`📋 Copiado al portapapeles: ${tag}`);
+        function copiarTag(btn, texto) {
+            navigator.clipboard.writeText(texto);
+            const check = btn.querySelector('.check-icon');
+            check.classList.remove('hidden');
+            setTimeout(() => {
+                check.classList.add('hidden');
+            }, 1000);
         }
 
-        async function syncData() {
-            try {
-                const res = await fetch('/api/estado');
-                const data = await res.json();
-
-                document.getElementById('cnt-0').innerText = `${data.estado.conteo_diario['Alexis Castillon'] || 0} / ${data.estado.conteo_mensual['Alexis Castillon'] || 0}`;
-                document.getElementById('cnt-1').innerText = `${data.estado.conteo_diario['Marien Gricel'] || 0} / ${data.estado.conteo_mensual['Marien Gricel'] || 0}`;
-                document.getElementById('cnt-2').innerText = `${data.estado.conteo_diario['De Yullis Nicolas'] || 0} / ${data.estado.conteo_mensual['De Yullis Nicolas'] || 0}`;
-
-                const pill = document.getElementById('status-pill');
-                const btn = document.getElementById('btn-toggle');
-
-                if (data.ejecutando) {
-                    pill.innerText = "🟢 ASIGNADOR ACTIVO (Revisando cada 1 min)";
-                    pill.className = "inline-block px-4 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300";
-                    btn.innerText = "⏸ PAUSAR ASIGNADOR";
-                    btn.className = "bg-amber-600 hover:bg-amber-700 text-white text-xl font-black px-8 py-4 rounded-2xl shadow-lg border border-amber-500 transition";
-                } else {
-                    pill.innerText = "🔴 ASIGNADOR PAUSADO";
-                    pill.className = "inline-block px-4 py-1 rounded-full text-xs font-bold bg-gray-100 text-gray-700 border border-gray-300";
-                    btn.innerText = "🚀 ASIGNAR TICKETS";
-                    btn.className = "bg-amber-500 hover:bg-amber-600 text-white text-xl font-black px-8 py-4 rounded-2xl shadow-lg border border-amber-400 transition";
-                }
-
-                const terminal = document.getElementById('terminal-log');
-                terminal.innerHTML = (data.estado.log_actividad || []).map(l => `<div>${l}</div>`).join('');
-            } catch (e) {
-                console.error("Error sincronizando:", e);
+        async function agregarNuevoTag(categoria) {
+            const nuevo = prompt(`Nuevo Tag para ${categoria}:`, "-C:");
+            if (nuevo && nuevo.trim() !== "") {
+                tagsData[categoria].push(nuevo.trim());
+                renderTags();
+                await fetch('/api/guardar_tags', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ tags: tagsData })
+                });
             }
         }
 
-        async function toggleRobot() { await fetch('/api/toggle', { method: 'POST' }); syncData(); }
-        async function detenerRobot() { await fetch('/api/detener', { method: 'POST' }); syncData(); }
-
-        function verReporte(tipo) {
-            fetch('/api/estado').then(r => r.json()).then(d => {
-                const c = tipo === 'diario' ? d.estado.conteo_diario : d.estado.conteo_mensual;
-                alert(`📊 REPORTE ${tipo.toUpperCase()}:\n\nAlexis: ${c['Alexis Castillon'] || 0}\nMarien: ${c['Marien Gricel'] || 0}\nNicolas: ${c['De Yullis Nicolas'] || 0}`);
-            });
+        function triggerFoto(nombre) {
+            document.getElementById(`file-${nombre}`).click();
         }
 
-        function exportarExcel() {
-            const df = document.getElementById('date-from').value;
-            const dt = document.getElementById('date-to').value;
-            if(!df || !dt) return alert("Por favor seleccione fecha 'Desde' y 'Hasta'.");
+        function subirFoto(event, nombre) {
+            const file = event.target.files[0];
+            if (!file) return;
 
-            const data = [
-                ["Reporte de Casos por Etiquetas", `Rango: ${df} a ${dt}`],
-                [],
-                ["Categoría", "Etiqueta", "Cantidad Casos"],
-                ["ARCIBA", "-C:Arciba-Pagos", 5],
-                ["ARCIBA", "-C:Arciba-DDJJ", 3],
-                ["AUTOMOTOR", "-C:Automotor-Padron", 8],
-                ["CONVENIO MULTILATERAL", "-C:CM-DDJJ", 12]
-            ];
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const base64 = e.target.result;
+                await fetch('/api/guardar_foto', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ nombre: nombre, foto: base64 })
+                });
+                location.reload();
+            };
+            reader.readAsDataURL(file);
+        }
 
-            const ws = XLSX.utils.aoa_to_sheet(data);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Reporte_Casos");
-            XLSX.writeFile(wb, `Reporte_AV_Soporte_${df}_al_${dt}.xlsx`);
+        async function simularAsignacion() {
+            const res = await fetch('/api/simular', { method: 'POST' });
+            const data = await res.json();
+            alert(`🧪 SIMULACIÓN:\nEl próximo ticket sería asignado a: ${data.siguiente}`);
+        }
+
+        async function ejecutarAsignacion() {
+            const res = await fetch('/api/ejecutar', { method: 'POST' });
+            const data = await res.json();
+            location.reload();
         }
 
         renderTags();
-        syncData();
-        setInterval(syncData, 3000);
     </script>
 </body>
 </html>
 """
 
 @app.route('/')
-def index():
-    return render_template_string(HTML_LAYOUT)
+def home():
+    estado = obtener_estado()
+    return render_template_string(HTML_TEMPLATE, integrantes=INTEGRANTES, estado=estado)
 
-@app.route('/api/estado')
-def api_estado():
-    return jsonify({"ejecutando": ejecutando_robot, "estado": obtener_estado_nube()})
+@app.route('/api/guardar_foto', methods=['POST'])
+def api_guardar_foto():
+    data = request.json
+    estado = obtener_estado()
+    estado['fotos'][data['nombre']] = data['foto']
+    guardar_estado(estado)
+    return jsonify({"success": True})
 
-@app.route('/api/toggle', methods=['POST'])
-def api_toggle():
-    global ejecutando_robot
-    ejecutando_robot = not ejecutando_robot
-    if ejecutando_robot:
-        Thread(target=ciclo_asignacion_redmine).start()
-    return jsonify({"ok": True, "ejecutando": ejecutando_robot})
+@app.route('/api/guardar_tags', methods=['POST'])
+def api_guardar_tags():
+    data = request.json
+    estado = obtener_estado()
+    estado['tags'] = data['tags']
+    guardar_estado(estado)
+    return jsonify({"success": True})
 
-@app.route('/api/detener', methods=['POST'])
-def api_detener():
-    global ejecutando_robot
-    ejecutando_robot = False
-    estado = obtener_estado_nube()
-    registrar_log(estado, "🛑 DETENER ASIGNADOR accionado manualmente.")
-    guardar_estado_nube(estado)
-    return jsonify({"ok": True})
+@app.route('/api/simular', methods=['POST'])
+def api_simular():
+    estado = obtener_estado()
+    siguiente_idx = (estado['ultimo_indice'] + 1) % len(INTEGRANTES)
+    siguiente_persona = INTEGRANTES[siguiente_idx]['nombre']
+    return jsonify({"siguiente": siguiente_persona})
+
+@app.route('/reporte')
+def reporte():
+    tipo = request.args.get('tipo', 'diario')
+    estado = obtener_estado()
+    df = pd.DataFrame([
+        {"Integrante": p["nombre"], "Tickets Asignados": estado['conteo_diario'].get(p["nombre"], 0) if tipo == 'diario' else estado['conteo_mensual'].get(p["nombre"], 0)}
+        for p in INTEGRANTES
+    ])
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte')
+    output.seek(0)
+    return send_file(output, download_name=f'reporte_{tipo}.xlsx', as_attachment=True)
 
 if __name__ == '__main__':
-    Thread(target=temporizador_1minuto, daemon=True).start()
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    app.run(host='0.0.0.0', port=5000, debug=True)
