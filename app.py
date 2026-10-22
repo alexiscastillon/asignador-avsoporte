@@ -199,7 +199,7 @@ HTML_TEMPLATE = """
         }
 
         renderTags();
-        setInterval(() => location.reload(), 5000);
+      setInterval(() => location.reload(), 60000);
     </script>
 </body>
 </html>
