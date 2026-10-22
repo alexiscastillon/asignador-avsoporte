@@ -3,12 +3,13 @@ import json
 import requests
 from datetime import datetime
 from flask import Flask, render_template_string, jsonify, request
+from redminelib import Redmine
 
 app = Flask(__name__)
 
 # Configuración de Redmine
 REDMINE_URL = 'https://sistemas.agip.gob.ar/redmine/'
-REDMINE_API_KEY = os.environ.get('REDMINE_API_KEY', 'TU_API_KEY_AQUI')
+REDMINE_API_KEY = os.environ.get('REDMINE_API_KEY', '5c5a1ada0bb1066b69ae6b78a8fe7a135701ab7f')
 GROUP_ID = 237  # ID AV-Soporte
 
 # JSONBin Config
@@ -48,7 +49,8 @@ def obtener_estado():
         return estado_local
     headers = {'X-Master-Key': JSONBIN_KEY}
     try:
-        r = requests.get(JSONBIN_URL, headers=headers, timeout=5)
+        url = f"{JSONBIN_URL}/latest" if not JSONBIN_URL.endswith('/latest') else JSONBIN_URL
+        r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
             data = r.json()['record']
             if 'fotos' not in data: data['fotos'] = {p["nombre"]: "" for p in INTEGRANTES}
@@ -69,11 +71,20 @@ def guardar_estado(data):
     except Exception as e:
         print("Error JSONBin put:", e)
 
+def registrar_log(estado, mensaje):
+    hora = datetime.now().strftime("%H:%M:%S")
+    log_entry = f"[{hora}] {mensaje}"
+    estado.setdefault("log_actividad", [])
+    estado["log_actividad"].insert(0, log_entry)
+    if len(estado["log_actividad"]) > 50:
+        estado["log_actividad"].pop()
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asignador Automático AV-Soporte</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -93,8 +104,8 @@ HTML_TEMPLATE = """
             <p class="text-sm text-[#9a3412] font-semibold">
                 Lunes a Viernes de 09:00 a 18:00 hs | Frecuencia: Cada 1 minuto
             </p>
-            <span id="status-badge" class="inline-block px-3 py-1 bg-red-100 text-red-700 font-bold text-xs rounded-full uppercase tracking-wider">
-                ● ASIGNADOR PAUSADO
+            <span id="status-badge" class="inline-block px-3 py-1 bg-amber-100 text-amber-800 font-bold text-xs rounded-full uppercase tracking-wider border border-amber-300">
+                ● ASIGNADOR DISPONIBLE
             </span>
         </div>
 
@@ -131,7 +142,7 @@ HTML_TEMPLATE = """
             {% endfor %}
         </div>
 
-        <!-- Acciones Principales (Sin botones de reporte) -->
+        <!-- Acciones Principales -->
         <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex items-center justify-center gap-4">
             <button onclick="simularAsignacion()" class="px-5 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl transition text-sm shadow-md">
                 🧪 SIMULACIÓN
@@ -248,6 +259,7 @@ HTML_TEMPLATE = """
         async function ejecutarAsignacion() {
             const res = await fetch('/api/ejecutar', { method: 'POST' });
             const data = await res.json();
+            alert(data.mensaje || "Asignación manual ejecutada.");
             location.reload();
         }
 
@@ -285,5 +297,19 @@ def api_simular():
     siguiente_persona = INTEGRANTES[siguiente_idx]['nombre']
     return jsonify({"siguiente": siguiente_persona})
 
+@app.route('/api/ejecutar', methods=['POST'])
+def api_ejecutar():
+    estado = obtener_estado()
+    siguiente_idx = (estado['ultimo_indice'] + 1) % len(INTEGRANTES)
+    usr_destino = INTEGRANTES[siguiente_idx]
+    
+    estado['ultimo_indice'] = siguiente_idx
+    estado['conteo_diario'][usr_destino['nombre']] = estado['conteo_diario'].get(usr_destino['nombre'], 0) + 1
+    estado['conteo_mensual'][usr_destino['nombre']] = estado['conteo_mensual'].get(usr_destino['nombre'], 0) + 1
+    
+    registrar_log(estado, f"🚀 Asignación ejecutada -> Asignado a {usr_destino['nombre']}")
+    guardar_estado(estado)
+    return jsonify({"success": True, "mensaje": f"Ticket asignado exitosamente a {usr_destino['nombre']}"})
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
