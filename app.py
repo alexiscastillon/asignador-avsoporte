@@ -8,7 +8,7 @@ from redminelib import Redmine
 app = Flask(__name__)
 
 # Configuración de Redmine
-REDMINE_URL = 'https://sistemas.agip.gob.ar/redmine/'
+REDMINE_URL = 'https://redmine.agip.gob.ar/'
 REDMINE_API_KEY = os.environ.get('REDMINE_API_KEY', '5c5a1ada0bb1066b69ae6b78a8fe7a135701ab7f')
 GROUP_ID = 237  # ID AV-Soporte
 
