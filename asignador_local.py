@@ -3,11 +3,12 @@ import requests
 from datetime import datetime
 from redminelib import Redmine
 
-# --- CONFIGURACIÓN AGIP Y JSONBIN ---
+# --- CONFIGURACIÓN CONEXIÓN AGIP ---
 URL_REDMINE = 'https://redmine.agip.gob.ar/'
 MI_API_KEY = '5c5a1ada0bb1066b69ae6b78a8fe7a135701ab7f'
 PROJECT_SLUG = 'soporte'
 
+# --- CONFIGURACIÓN JSONBIN ---
 JSONBIN_ID = '6ad97155ac6210605a479aae'
 JSONBIN_KEY = '$2a$10$Gy6oKS.5GwyesYEX6azXpehmmHY5ahMdBiwqm7LOQnhYIP3RgpaU2'
 JSONBIN_URL = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
