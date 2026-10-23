@@ -70,7 +70,7 @@ HTML_TEMPLATE = """
         
         <div class="text-center space-y-2">
             <h1 class="text-3xl font-extrabold text-[#7c2d12]">🤖 Tablero Métricas AV-Soporte</h1>
-            <p class="text-sm text-[#9a3412] font-semibold">Lunes a Viernes de 09:00 a 18:00 hs | Frecuencia: Cada 1 minuto</p>
+            <p class="text-sm text-[#9a3412] font-semibold">Lunes a Viernes de 09:00 a 18:00 hs | Frecuencia: Cada 3 minutos</p>
             <div class="flex items-center justify-center gap-3 pt-1">
                 <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full uppercase tracking-wider border border-emerald-300">
                     🟢 TABLERO EN TIEMPO REAL
@@ -94,10 +94,11 @@ HTML_TEMPLATE = """
                 {% endif %}
 
                 <div class="relative group cursor-pointer mb-3" onclick="triggerFoto('{{ p.nombre }}')">
-                    <img id="img-{{ loop.index0 }}" src="{{ estado.fotos.get(p.nombre) or '' }}" 
-                         class="w-24 h-24 rounded-full object-cover border-4 border-amber-400 bg-amber-50 flex items-center justify-center font-bold text-2xl text-amber-800 {{ 'hidden' if not estado.fotos.get(p.nombre) else '' }}">
+                    {% set foto_url = estado.fotos.get(p.nombre) %}
+                    <img id="img-{{ loop.index0 }}" src="{{ foto_url or '' }}" 
+                         class="w-24 h-24 rounded-full object-cover border-4 border-amber-400 bg-amber-50 flex items-center justify-center font-bold text-2xl text-amber-800 {{ 'hidden' if not foto_url else '' }}">
                     
-                    <div id="avatar-{{ loop.index0 }}" class="w-24 h-24 rounded-full border-4 border-amber-400 bg-amber-500 text-white flex items-center justify-center font-bold text-2xl uppercase {{ 'hidden' if estado.fotos.get(p.nombre) else '' }}">
+                    <div id="avatar-{{ loop.index0 }}" class="w-24 h-24 rounded-full border-4 border-amber-400 bg-amber-500 text-white flex items-center justify-center font-bold text-2xl uppercase {{ 'hidden' if foto_url else '' }}">
                         {{ p.nombre[:2] }}
                     </div>
 
@@ -135,11 +136,16 @@ HTML_TEMPLATE = """
             const container = document.getElementById('tags-container');
             container.innerHTML = '';
             for (const [cat, tags] of Object.entries(tagsData)) {
-                let tagsHTML = tags.map(t => `
-                    <button onclick="copiarTag(this, '${t}')" class="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-semibold rounded-lg transition text-left flex items-center gap-1.5">
-                        <span>${t}</span>
-                        <span class="check-icon hidden text-emerald-600 font-bold">✅</span>
-                    </button>
+                let tagsHTML = tags.map((t, idx) => `
+                    <div class="inline-flex items-center bg-amber-50 border border-amber-200 rounded-lg text-xs font-semibold text-amber-900">
+                        <button onclick="copiarTag(this, '${t}')" class="px-2.5 py-1.5 hover:bg-amber-100 transition rounded-l-lg flex items-center gap-1.5">
+                            <span>${t}</span>
+                            <span class="check-icon hidden text-emerald-600 font-bold">✅</span>
+                        </button>
+                        <button onclick="eliminarTag('${cat}', ${idx})" class="px-2 py-1.5 text-amber-500 hover:text-red-600 hover:bg-red-50 rounded-r-lg transition border-l border-amber-200 font-bold" title="Eliminar Tag">
+                            ✕
+                        </button>
+                    </div>
                 `).join('');
 
                 container.innerHTML += `
@@ -174,19 +180,44 @@ HTML_TEMPLATE = """
             }
         }
 
+        async function eliminarTag(categoria, index) {
+            const tagEliminar = tagsData[categoria][index];
+            if (confirm(`¿Estás seguro de eliminar el tag "${tagEliminar}"?`)) {
+                tagsData[categoria].splice(index, 1);
+                renderTags();
+                await fetch('/api/guardar_tags', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ tags: tagsData })
+                });
+            }
+        }
+
         function triggerFoto(nombre) { document.getElementById(`file-${nombre}`).click(); }
 
         function subirFoto(event, nombre) {
             const file = event.target.files[0];
             if (!file) return;
+
             const reader = new FileReader();
-            reader.onload = async function(e) {
-                await fetch('/api/guardar_foto', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ nombre: nombre, foto: e.target.result })
-                });
-                location.reload();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 150;
+                    canvas.height = 150;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, 150, 150);
+                    
+                    const fotoComprimida = canvas.toDataURL('image/jpeg', 0.7);
+
+                    fetch('/api/guardar_foto', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ nombre: nombre, foto: fotoComprimida })
+                    }).then(() => location.reload());
+                };
+                img.src = e.target.result;
             };
             reader.readAsDataURL(file);
         }
@@ -199,39 +230,8 @@ HTML_TEMPLATE = """
         }
 
         renderTags();
-      setInterval(() => location.reload(), 60000);
+        // Recargar tablero automáticamente cada 3 minutos (180.000 milisegundos)
+        setInterval(() => location.reload(), 180000);
     </script>
 </body>
 </html>
-"""
-
-@app.route('/')
-def home():
-    return render_template_string(HTML_TEMPLATE, integrantes=EQUIPO_AV, estado=obtener_estado_nube())
-
-@app.route('/api/guardar_foto', methods=['POST'])
-def api_guardar_foto():
-    data = request.json
-    estado = obtener_estado_nube()
-    estado['fotos'][data['nombre']] = data['foto']
-    guardar_estado_nube(estado)
-    return jsonify({"success": True})
-
-@app.route('/api/guardar_tags', methods=['POST'])
-def api_guardar_tags():
-    data = request.json
-    estado = obtener_estado_nube()
-    estado['tags'] = data['tags']
-    guardar_estado_nube(estado)
-    return jsonify({"success": True})
-
-@app.route('/api/reiniciar_contadores', methods=['POST'])
-def api_reiniciar_contadores():
-    estado = obtener_estado_nube()
-    estado['conteo_diario'] = {p["nombre"]: 0 for p in EQUIPO_AV}
-    estado['conteo_mensual'] = {p["nombre"]: 0 for p in EQUIPO_AV}
-    guardar_estado_nube(estado)
-    return jsonify({"success": True})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
