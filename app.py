@@ -230,8 +230,39 @@ HTML_TEMPLATE = """
         }
 
         renderTags();
-        // Recargar tablero automáticamente cada 3 minutos (180.000 milisegundos)
         setInterval(() => location.reload(), 180000);
     </script>
 </body>
 </html>
+"""
+
+@app.route('/')
+def home():
+    return render_template_string(HTML_TEMPLATE, integrantes=EQUIPO_AV, estado=obtener_estado_nube())
+
+@app.route('/api/guardar_foto', methods=['POST'])
+def api_guardar_foto():
+    data = request.json
+    estado = obtener_estado_nube()
+    estado['fotos'][data['nombre']] = data['foto']
+    guardar_estado_nube(estado)
+    return jsonify({"success": True})
+
+@app.route('/api/guardar_tags', methods=['POST'])
+def api_guardar_tags():
+    data = request.json
+    estado = obtener_estado_nube()
+    estado['tags'] = data['tags']
+    guardar_estado_nube(estado)
+    return jsonify({"success": True})
+
+@app.route('/api/reiniciar_contadores', methods=['POST'])
+def api_reiniciar_contadores():
+    estado = obtener_estado_nube()
+    estado['conteo_diario'] = {p["nombre"]: 0 for p in EQUIPO_AV}
+    estado['conteo_mensual'] = {p["nombre"]: 0 for p in EQUIPO_AV}
+    guardar_estado_nube(estado)
+    return jsonify({"success": True})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
