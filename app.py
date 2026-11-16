@@ -138,7 +138,7 @@ HTML_TEMPLATE = """
             <div class="relative flex items-center justify-center">
                 <!-- Puntero superior -->
                 <div class="absolute -top-3 z-10 w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[24px] border-t-red-600 drop-shadow"></div>
-                <canvas id="ruletaCanvas" width="320" height="320" class="rounded-full shadow-lg border-4 border-amber-400"></canvas>
+                <canvas id="ruletaCanvas" width="340" height="340" class="rounded-full shadow-lg border-4 border-amber-400 bg-white"></canvas>
             </div>
 
             <button id="btn-girar" onclick="girarRuleta()" class="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl transition text-sm shadow-md active:scale-95">
@@ -219,14 +219,14 @@ HTML_TEMPLATE = """
             alert(`🧪 SIMULACIÓN:\nEl próximo ticket le correspondería a: ${data.siguiente}`);
         }
 
-        // --- LÓGICA RULETA NATIVA ---
+        // --- LÓGICA RULETA NATIVA OPTIMIZADA Y LEGIBLE ---
         const opcionesRuleta = [
-            { texto: "🧉 Te toca armar el mate", color: "#d97706" },
-            { texto: "🍪 Comprate unas galletitas RATA", color: "#9a3412" },
-            { texto: "🔥 2x1 en chichas", color: "#059669" },
-            { texto: "😎 Zafaste por hoy", color: "#2563eb" },
-            { texto: "☕ Ronda de café para todos", color: "#7c2d12" },
-            { texto: "🎫 Te comés el próximo ticket", color: "#dc2626" }
+            { texto: "Preparate los mates", emoji: "🧉", color: "#d97706" },
+            { texto: "2x1 en chichas", emoji: "🔥", color: "#059669" },
+            { texto: "Zafaste", emoji: "😎", color: "#2563eb" },
+            { texto: "A comprar jugos", emoji: "🧃", color: "#9a3412" },
+            { texto: "Café para todos", emoji: "☕", color: "#7c2d12" },
+            { texto: "Te comés el ticket", emoji: "🎫", color: "#dc2626" }
         ];
 
         const canvas = document.getElementById("ruletaCanvas");
@@ -244,25 +244,47 @@ HTML_TEMPLATE = """
             for (let i = 0; i < numOpciones; i++) {
                 const angulo = anguloActual + i * arco;
                 
+                // Porción de la ruleta
                 ctx.beginPath();
                 ctx.fillStyle = opcionesRuleta[i].color;
                 ctx.moveTo(radio, radio);
-                ctx.arc(radio, radio, radio, angulo, angulo + arco);
+                ctx.arc(radio, radio, radio - 5, angulo, angulo + arco);
                 ctx.lineTo(radio, radio);
                 ctx.fill();
                 ctx.strokeStyle = "#ffffff";
-                ctx.lineWidth = 2;
+                ctx.lineWidth = 3;
                 ctx.stroke();
 
+                // Texto legible orientado correctamente
                 ctx.save();
                 ctx.translate(radio, radio);
-                ctx.rotate(angulo + arco / 2);
-                ctx.textAlign = "right";
+                const anguloMedio = angulo + arco / 2;
+                ctx.rotate(anguloMedio);
+
+                // Si el texto queda hacia la izquierda, lo enderezamos para que nunca se lea al revés
+                if (anguloMedio > Math.PI / 2 && anguloMedio < 3 * Math.PI / 2) {
+                    ctx.rotate(Math.PI);
+                    ctx.textAlign = "left";
+                    ctx.translate(-radio + 40, 0);
+                } else {
+                    ctx.textAlign = "right";
+                    ctx.translate(radio - 40, 0);
+                }
+
                 ctx.fillStyle = "#ffffff";
-                ctx.font = "bold 12px 'Plus Jakarta Sans', sans-serif";
-                ctx.fillText(opcionesRuleta[i].texto, radio - 14, 4);
+                ctx.font = "bold 13px 'Plus Jakarta Sans', sans-serif";
+                ctx.fillText(opcionesRuleta[i].emoji + " " + opcionesRuleta[i].texto, 0, 4);
                 ctx.restore();
             }
+
+            // Circulo central decorativo
+            ctx.beginPath();
+            ctx.arc(radio, radio, 22, 0, 2 * Math.PI);
+            ctx.fillStyle = "#ffffff";
+            ctx.fill();
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = "#fbbf24";
+            ctx.stroke();
         }
 
         function girarRuleta() {
@@ -301,8 +323,9 @@ HTML_TEMPLATE = """
             const anguloNormalizado = (1.5 * Math.PI - (anguloActual % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
             const indiceGanador = Math.floor(anguloNormalizado / arco);
             
+            const ganadora = opcionesRuleta[indiceGanador];
             const resDiv = document.getElementById("resultado-ruleta");
-            resDiv.textContent = `🎉 Resultado: ${opcionesRuleta[indiceGanador].texto}`;
+            resDiv.textContent = `🎉 Resultado: ${ganadora.emoji} ${ganadora.texto}`;
             resDiv.classList.remove("hidden");
         }
 
@@ -326,7 +349,7 @@ def api_guardar_foto():
     estado = obtener_estado_nube()
     estado['fotos'][data['nombre']] = data['foto']
     guardar_estado_nube(estado)
-    return jsonify({"success": True})
+    return jsonify({"success": true})
 
 @app.route('/api/guardar_tags', methods=['POST'])
 def api_guardar_tags():
