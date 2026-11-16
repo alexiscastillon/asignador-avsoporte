@@ -131,7 +131,7 @@ HTML_TEMPLATE = """
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="tags-container"></div>
         </div>
 
-        <!-- Ruleta de la Oficina (3 Opciones Exactas) -->
+        <!-- Ruleta de la Oficina (3 Opciones Exactas y Centradas) -->
         <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex flex-col items-center space-y-4">
             <h2 class="text-lg font-extrabold text-slate-800">🎡 Ruleta de la Oficina (¡Probá tu suerte!)</h2>
             
@@ -219,10 +219,10 @@ HTML_TEMPLATE = """
             alert(`🧪 SIMULACIÓN:\nEl próximo ticket le correspondería a: ${data.siguiente}`);
         }
 
-        // --- LÓGICA RULETA (EXACTAMENTE 3 OPCIONES, CENTRADAS Y CLARAS) ---
+        // --- LÓGICA RULETA (3 OPCIONES EXACTAS Y PERFECTAMENTE CENTRADAS) ---
         const opcionesRuleta = [
-            { texto: "2x1 en chichas", emoji: "🔥", color: "#059669" },
-            { texto: "Preparate los mates", emoji: "🧉", color: "#d97706" },
+            { texto: "2X1 en chichas", emoji: "🔥", color: "#059669" },
+            { texto: "Preparate mates", emoji: "🧉", color: "#d97706" },
             { texto: "A comprar jugo", emoji: "🧃", color: "#9a3412" }
         ];
 
@@ -241,43 +241,45 @@ HTML_TEMPLATE = """
             for (let i = 0; i < numOpciones; i++) {
                 const angulo = anguloActual + i * arco;
                 
-                // Dibujar sector
+                // Dibujar sector de la porción
                 ctx.beginPath();
                 ctx.fillStyle = opcionesRuleta[i].color;
                 ctx.moveTo(radio, radio);
-                ctx.arc(radio, radio, radio - 5, angulo, angulo + arco);
+                ctx.arc(radio, radio, radio - 6, angulo, angulo + arco);
                 ctx.lineTo(radio, radio);
                 ctx.fill();
                 ctx.strokeStyle = "#ffffff";
                 ctx.lineWidth = 4;
                 ctx.stroke();
 
-                // Dibujar texto perfectamente centrado en el sector
+                // Dibujar texto perfectamente centrado y legible
                 ctx.save();
                 ctx.translate(radio, radio);
                 const anguloMedio = angulo + arco / 2;
                 ctx.rotate(anguloMedio);
 
-                // Control para que el texto siempre se lea derecho
-                const anguloNormalizadoCentro = (anguloMedio % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-                if (anguloNormalizadoCentro > Math.PI / 2 && anguloNormalizadoCentro < 3 * Math.PI / 2) {
+                // Determinar si el texto queda boca abajo para rotarlo y mantenerlo legible
+                const anguloNormalizado = (anguloMedio % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+                const estaInv = anguloNormalizado > Math.PI / 2 && anguloNormalizado < 3 * Math.PI / 2;
+
+                if (estaInv) {
                     ctx.rotate(Math.PI);
-                    ctx.textAlign = "left";
-                    ctx.translate(-radio + 55, 0);
-                } else {
                     ctx.textAlign = "right";
-                    ctx.translate(radio - 55, 0);
+                    ctx.translate(-radio + 75, 0);
+                } else {
+                    ctx.textAlign = "left";
+                    ctx.translate(radio - 135, 0);
                 }
 
                 ctx.fillStyle = "#ffffff";
-                ctx.font = "bold 14px 'Plus Jakarta Sans', sans-serif";
-                ctx.fillText(opcionesRuleta[i].emoji + " " + opcionesRuleta[i].texto, 0, 5);
+                ctx.font = "bold 13px 'Plus Jakarta Sans', sans-serif";
+                ctx.fillText(opcionesRuleta[i].emoji + " " + opcionesRuleta[i].texto, 0, 4);
                 ctx.restore();
             }
 
-            // Centro decorativo
+            // Centro blanco con borde dorado para separar del texto
             ctx.beginPath();
-            ctx.arc(radio, radio, 26, 0, 2 * Math.PI);
+            ctx.arc(radio, radio, 32, 0, 2 * Math.PI);
             ctx.fillStyle = "#ffffff";
             ctx.fill();
             ctx.lineWidth = 4;
