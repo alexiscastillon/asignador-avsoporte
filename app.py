@@ -4,10 +4,8 @@ from flask import Flask, render_template_string, jsonify, request
 
 app = Flask(__name__)
 
-# --- CONFIGURACIÓN JSONBIN ---
-JSONBIN_ID = os.environ.get('JSONBIN_ID', '6ad97155ac6210605a479aae')
-JSONBIN_KEY = os.environ.get('JSONBIN_KEY', '$2a$10$Gy6oKS.5GwyesYEX6azXpehmmHY5ahMdBiwqm7LOQnhYIP3RgpaU2')
-JSONBIN_URL = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
+# --- CREDENCIALES FIREBASE ---
+FIREBASE_URL = os.environ.get('FIREBASE_URL', 'https://asignador-avsoporte-default-rtdb.firebaseio.com/estado.json')
 
 EQUIPO_AV = [
     {"nombre": "Alexis Castillon", "alias": "el alexis"},
@@ -26,38 +24,38 @@ DEFAULT_TAGS = {
 }
 
 def obtener_estado_nube():
-    headers = {'X-Master-Key': JSONBIN_KEY}
     try:
-        res = requests.get(f"{JSONBIN_URL}/latest", headers=headers, timeout=5)
+        res = requests.get(FIREBASE_URL, timeout=5)
         if res.status_code == 200:
-            data = res.json()['record']
-            if 'fotos' not in data: data['fotos'] = {p["nombre"]: "" for p in EQUIPO_AV}
-            if 'tags' not in data: data['tags'] = DEFAULT_TAGS
-            return data
+            data = res.json()
+            if data is not None:
+                if 'fotos' not in data: data['fotos'] = {p["nombre"]: "" for p in EQUIPO_AV}
+                if 'tags' not in data: data['tags'] = DEFAULT_TAGS
+                return data
     except Exception as e:
-        print("Error consultando JSONBin:", e)
+        print("Error consultando Firebase desde Render:", e)
     
     return {
         "ultimo_indice": -1,
         "conteo_diario": {p["nombre"]: 0 for p in EQUIPO_AV},
         "conteo_mensual": {p["nombre"]: 0 for p in EQUIPO_AV},
         "fotos": {p["nombre"]: "" for p in EQUIPO_AV},
-        "tags": DEFAULT_TAGS
+        "tags": DEFAULT_TAGS,
+        "log_actividad": ["🟢 Tablero en línea. Esperando ejecuciones de la red local..."]
     }
 
 def guardar_estado_nube(estado):
-    headers = {'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY}
     try:
-        requests.put(JSONBIN_URL, json=estado, headers=headers, timeout=5)
+        requests.put(FIREBASE_URL, json=estado, timeout=5)
     except Exception as e:
-        print("Error al guardar en JSONBin:", e)
+        print("Error al guardar en Firebase desde Render:", e)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>AV-Soporte | Tablero Métrica</title>
+    <title>AV-Soporte | Tablero de Control</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -69,36 +67,22 @@ HTML_TEMPLATE = """
     <div class="max-w-6xl mx-auto space-y-6">
         
         <div class="text-center space-y-2">
-            <h1 class="text-3xl font-extrabold text-[#7c2d12]">🤖 Tablero Métricas AV-Soporte</h1>
-            <p class="text-sm text-[#9a3412] font-semibold">Lunes a Viernes de 09:00 a 18:00 hs | Frecuencia: Cada 3 minutos</p>
-            <div class="flex items-center justify-center gap-3 pt-1">
-                <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full uppercase tracking-wider border border-emerald-300">
-                    🟢 TABLERO EN TIEMPO REAL
-                </span>
-                <button onclick="reiniciarContadores()" class="px-3 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 font-extrabold text-xs rounded-full border border-amber-400 transition flex items-center gap-1 shadow-sm">
-                    🔄 REINICIAR CONTADORES
-                </button>
-            </div>
+            <h1 class="text-3xl font-extrabold text-[#7c2d12]">🤖 Asignador Automático AV-Soporte</h1>
+            <p class="text-sm text-[#9a3412] font-semibold">Lunes a Viernes de 09:00 a 18:00 hs | Frecuencia: Cada 1 minuto (Refresco web: Cada 10 min)</p>
+            <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full uppercase tracking-wider border border-emerald-300">
+                🟢 TABLERO EN TIEMPO REAL
+            </span>
         </div>
 
         <!-- Tarjetas del Equipo -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             {% for p in integrantes %}
-            {% set es_ultimo = (loop.index0 == estado.ultimo_indice) %}
-            <div class="bg-white p-6 rounded-2xl border {{ 'border-emerald-400 ring-2 ring-emerald-300' if es_ultimo else 'border-amber-100' }} card-shadow text-center relative flex flex-col items-center transition-all">
-                
-                {% if es_ultimo %}
-                <span class="absolute -top-3 bg-emerald-500 text-white text-[10px] font-extrabold px-3 py-0.5 rounded-full uppercase tracking-wider shadow">
-                    Último Asignado
-                </span>
-                {% endif %}
-
+            <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow text-center relative flex flex-col items-center">
                 <div class="relative group cursor-pointer mb-3" onclick="triggerFoto('{{ p.nombre }}')">
-                    {% set foto_url = estado.fotos.get(p.nombre) %}
-                    <img id="img-{{ loop.index0 }}" src="{{ foto_url or '' }}" 
-                         class="w-24 h-24 rounded-full object-cover border-4 border-amber-400 bg-amber-50 flex items-center justify-center font-bold text-2xl text-amber-800 {{ 'hidden' if not foto_url else '' }}">
+                    <img id="img-{{ loop.index0 }}" src="{{ estado.fotos.get(p.nombre) or '' }}" 
+                         class="w-24 h-24 rounded-full object-cover border-4 border-amber-400 bg-amber-50 flex items-center justify-center font-bold text-2xl text-amber-800 {{ 'hidden' if not estado.fotos.get(p.nombre) else '' }}">
                     
-                    <div id="avatar-{{ loop.index0 }}" class="w-24 h-24 rounded-full border-4 border-amber-400 bg-amber-500 text-white flex items-center justify-center font-bold text-2xl uppercase {{ 'hidden' if foto_url else '' }}">
+                    <div id="avatar-{{ loop.index0 }}" class="w-24 h-24 rounded-full border-4 border-amber-400 bg-amber-500 text-white flex items-center justify-center font-bold text-2xl uppercase {{ 'hidden' if estado.fotos.get(p.nombre) else '' }}">
                         {{ p.nombre[:2] }}
                     </div>
 
@@ -121,10 +105,47 @@ HTML_TEMPLATE = """
             {% endfor %}
         </div>
 
-        <!-- Tags Cierre de Incidentes -->
+        <!-- Botones de Acción (Simulación y Actualizar Manual) -->
+        <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex flex-wrap items-center justify-center gap-4">
+            <button onclick="simularAsignacion()" class="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-extrabold rounded-xl transition text-sm shadow-md">
+                🧪 PROBAR SIMULACIÓN
+            </button>
+            <button onclick="location.reload()" class="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-xl transition text-sm shadow-md">
+                🔄 ACTUALIZAR AHORA
+            </button>
+        </div>
+
+        <!-- Terminal de Logs -->
+        <div class="bg-slate-900 rounded-2xl p-4 font-mono text-xs text-amber-400 h-48 overflow-y-auto border border-slate-800 shadow-inner">
+            <div class="text-slate-500 mb-2 border-b border-slate-800 pb-1">⚡ Monitoreo de Asignación en Tiempo Real (Desde la Intranet AGIP)</div>
+            <div id="terminal-logs" class="space-y-1">
+                {% for log in estado.log_actividad %}
+                <div>{{ log }}</div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Tags Categoría -->
         <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow space-y-6">
             <h2 class="text-lg font-extrabold text-slate-800">🏷️ Tags Cierre de Incidentes (Haz clic para copiar)</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="tags-container"></div>
+        </div>
+
+        <!-- Ruleta de Prendas / Oficina (Debajo de todo) -->
+        <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex flex-col items-center space-y-4">
+            <h2 class="text-lg font-extrabold text-slate-800">🎡 Ruleta de la Oficina (¡Probá tu suerte!)</h2>
+            
+            <div class="relative flex items-center justify-center">
+                <!-- Puntero superior -->
+                <div class="absolute -top-3 z-10 w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[24px] border-t-red-600 drop-shadow"></div>
+                <canvas id="ruletaCanvas" width="320" height="320" class="rounded-full shadow-lg border-4 border-amber-400"></canvas>
+            </div>
+
+            <button id="btn-girar" onclick="girarRuleta()" class="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl transition text-sm shadow-md active:scale-95">
+                🎲 ¡GIRAR RULETA!
+            </button>
+
+            <div id="resultado-ruleta" class="hidden px-4 py-2 bg-amber-100 border border-amber-300 text-amber-900 font-extrabold rounded-xl text-center text-base animate-bounce"></div>
         </div>
 
     </div>
@@ -136,16 +157,11 @@ HTML_TEMPLATE = """
             const container = document.getElementById('tags-container');
             container.innerHTML = '';
             for (const [cat, tags] of Object.entries(tagsData)) {
-                let tagsHTML = tags.map((t, idx) => `
-                    <div class="inline-flex items-center bg-amber-50 border border-amber-200 rounded-lg text-xs font-semibold text-amber-900">
-                        <button onclick="copiarTag(this, '${t}')" class="px-2.5 py-1.5 hover:bg-amber-100 transition rounded-l-lg flex items-center gap-1.5">
-                            <span>${t}</span>
-                            <span class="check-icon hidden text-emerald-600 font-bold">✅</span>
-                        </button>
-                        <button onclick="eliminarTag('${cat}', ${idx})" class="px-2 py-1.5 text-amber-500 hover:text-red-600 hover:bg-red-50 rounded-r-lg transition border-l border-amber-200 font-bold" title="Eliminar Tag">
-                            ✕
-                        </button>
-                    </div>
+                let tagsHTML = tags.map(t => `
+                    <button onclick="copiarTag(this, '${t}')" class="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-semibold rounded-lg transition text-left flex items-center gap-1.5">
+                        <span>${t}</span>
+                        <span class="check-icon hidden text-emerald-600 font-bold">✅</span>
+                    </button>
                 `).join('');
 
                 container.innerHTML += `
@@ -180,57 +196,121 @@ HTML_TEMPLATE = """
             }
         }
 
-        async function eliminarTag(categoria, index) {
-            const tagEliminar = tagsData[categoria][index];
-            if (confirm(`¿Estás seguro de eliminar el tag "${tagEliminar}"?`)) {
-                tagsData[categoria].splice(index, 1);
-                renderTags();
-                await fetch('/api/guardar_tags', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ tags: tagsData })
-                });
-            }
-        }
-
         function triggerFoto(nombre) { document.getElementById(`file-${nombre}`).click(); }
 
         function subirFoto(event, nombre) {
             const file = event.target.files[0];
             if (!file) return;
-
             const reader = new FileReader();
-            reader.onload = function(e) {
-                const img = new Image();
-                img.onload = function() {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 150;
-                    canvas.height = 150;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, 150, 150);
-                    
-                    const fotoComprimida = canvas.toDataURL('image/jpeg', 0.7);
-
-                    fetch('/api/guardar_foto', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ nombre: nombre, foto: fotoComprimida })
-                    }).then(() => location.reload());
-                };
-                img.src = e.target.result;
+            reader.onload = async function(e) {
+                await fetch('/api/guardar_foto', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ nombre: nombre, foto: e.target.result })
+                });
+                location.reload();
             };
             reader.readAsDataURL(file);
         }
 
-        async function reiniciarContadores() {
-            if (confirm("¿Estás seguro de que deseas reiniciar todos los contadores a 0 / 0?")) {
-                await fetch('/api/reiniciar_contadores', { method: 'POST' });
-                location.reload();
+        async function simularAsignacion() {
+            const res = await fetch('/api/simular', { method: 'POST' });
+            const data = await res.json();
+            alert(`🧪 SIMULACIÓN:\nEl próximo ticket le correspondería a: ${data.siguiente}`);
+        }
+
+        // --- LÓGICA RULETA NATIVA ---
+        const opcionesRuleta = [
+            { texto: "🧉 Te toca armar el mate", color: "#d97706" },
+            { texto: "🍪 Comprate unas galletitas RATA", color: "#9a3412" },
+            { texto: "🔥 2x1 en chichas", color: "#059669" },
+            { texto: "😎 Zafaste por hoy", color: "#2563eb" },
+            { texto: "☕ Ronda de café para todos", color: "#7c2d12" },
+            { texto: "🎫 Te comés el próximo ticket", color: "#dc2626" }
+        ];
+
+        const canvas = document.getElementById("ruletaCanvas");
+        const ctx = canvas.getContext("2d");
+        let anguloActual = 0;
+        let girando = false;
+
+        function dibujarRuleta() {
+            const numOpciones = opcionesRuleta.length;
+            const arco = (2 * Math.PI) / numOpciones;
+            const radio = canvas.width / 2;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (let i = 0; i < numOpciones; i++) {
+                const angulo = anguloActual + i * arco;
+                
+                ctx.beginPath();
+                ctx.fillStyle = opcionesRuleta[i].color;
+                ctx.moveTo(radio, radio);
+                ctx.arc(radio, radio, radio, angulo, angulo + arco);
+                ctx.lineTo(radio, radio);
+                ctx.fill();
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.save();
+                ctx.translate(radio, radio);
+                ctx.rotate(angulo + arco / 2);
+                ctx.textAlign = "right";
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "bold 12px 'Plus Jakarta Sans', sans-serif";
+                ctx.fillText(opcionesRuleta[i].texto, radio - 14, 4);
+                ctx.restore();
             }
         }
 
+        function girarRuleta() {
+            if (girando) return;
+            girando = true;
+            const resDiv = document.getElementById("resultado-ruleta");
+            resDiv.classList.add("hidden");
+
+            const vueltasExtra = Math.floor(Math.random() * 5 + 5) * 2 * Math.PI;
+            const anguloDestino = anguloActual + vueltasExtra + Math.random() * 2 * Math.PI;
+            const duracion = 4000;
+            const inicio = performance.now();
+            const anguloInicial = anguloActual;
+
+            function animar(tiempoActual) {
+                const transcurrido = tiempoActual - inicio;
+                const progreso = Math.min(transcurrido / duracion, 1);
+                const easeOut = 1 - Math.pow(1 - progreso, 3);
+
+                anguloActual = anguloInicial + (anguloDestino - anguloInicial) * easeOut;
+                dibujarRuleta();
+
+                if (progreso < 1) {
+                    requestAnimationFrame(animar);
+                } else {
+                    girando = false;
+                    calcularGanador();
+                }
+            }
+            requestAnimationFrame(animar);
+        }
+
+        function calcularGanador() {
+            const numOpciones = opcionesRuleta.length;
+            const arco = (2 * Math.PI) / numOpciones;
+            const anguloNormalizado = (1.5 * Math.PI - (anguloActual % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            const indiceGanador = Math.floor(anguloNormalizado / arco);
+            
+            const resDiv = document.getElementById("resultado-ruleta");
+            resDiv.textContent = `🎉 Resultado: ${opcionesRuleta[indiceGanador].texto}`;
+            resDiv.classList.remove("hidden");
+        }
+
+        dibujarRuleta();
         renderTags();
-        setInterval(() => location.reload(), 180000);
+        
+        // Refresco automático cada 10 minutos (600.000 ms) para ahorrar datos
+        setInterval(() => location.reload(), 600000);
     </script>
 </body>
 </html>
@@ -256,13 +336,11 @@ def api_guardar_tags():
     guardar_estado_nube(estado)
     return jsonify({"success": True})
 
-@app.route('/api/reiniciar_contadores', methods=['POST'])
-def api_reiniciar_contadores():
+@app.route('/api/simular', methods=['POST'])
+def api_simular():
     estado = obtener_estado_nube()
-    estado['conteo_diario'] = {p["nombre"]: 0 for p in EQUIPO_AV}
-    estado['conteo_mensual'] = {p["nombre"]: 0 for p in EQUIPO_AV}
-    guardar_estado_nube(estado)
-    return jsonify({"success": True})
+    siguiente_idx = (estado.get('ultimo_indice', -1) + 1) % len(EQUIPO_AV)
+    return jsonify({"siguiente": EQUIPO_AV[siguiente_idx]['nombre']})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
