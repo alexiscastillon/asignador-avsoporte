@@ -105,7 +105,7 @@ HTML_TEMPLATE = """
             {% endfor %}
         </div>
 
-        <!-- Botones de Acción (Simulación y Actualizar Manual) -->
+        <!-- Botones de Acción -->
         <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex flex-wrap items-center justify-center gap-4">
             <button onclick="simularAsignacion()" class="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-extrabold rounded-xl transition text-sm shadow-md">
                 🧪 PROBAR SIMULACIÓN
@@ -131,21 +131,21 @@ HTML_TEMPLATE = """
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="tags-container"></div>
         </div>
 
-        <!-- Ruleta de la Oficina (3 Opciones Exactas y Centradas) -->
+        <!-- Ruleta de la Oficina (Limpia, sin letras adentro y con 5 colores) -->
         <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex flex-col items-center space-y-4">
             <h2 class="text-lg font-extrabold text-slate-800">🎡 Ruleta de la Oficina (¡Probá tu suerte!)</h2>
             
             <div class="relative flex items-center justify-center">
                 <!-- Puntero superior -->
                 <div class="absolute -top-3 z-10 w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[24px] border-t-red-600 drop-shadow"></div>
-                <canvas id="ruletaCanvas" width="340" height="340" class="rounded-full shadow-lg border-4 border-amber-400 bg-white"></canvas>
+                <canvas id="ruletaCanvas" width="320" height="320" class="rounded-full shadow-lg border-4 border-amber-400 bg-white"></canvas>
             </div>
 
             <button id="btn-girar" onclick="girarRuleta()" class="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl transition text-sm shadow-md active:scale-95">
                 🎲 ¡GIRAR RULETA!
             </button>
 
-            <div id="resultado-ruleta" class="hidden px-4 py-2 bg-amber-100 border border-amber-300 text-amber-900 font-extrabold rounded-xl text-center text-base animate-bounce"></div>
+            <div id="resultado-ruleta" class="hidden px-4 py-3 bg-amber-100 border border-amber-300 text-amber-900 font-extrabold rounded-xl text-center text-base animate-bounce"></div>
         </div>
 
     </div>
@@ -184,9 +184,9 @@ HTML_TEMPLATE = """
         }
 
         async function agregarNuevoTag(categoria) {
-            const nuevo = prompt(`Nuevo Tag para ${categoria}:`, "-C:");
-            if (nuevo && nuevo.trim() !== "") {
-                tagsData[categoria].push(nuevo.trim());
+            const promptVal = prompt(`Nuevo Tag para ${categoria}:`, "-C:");
+            if (promptVal && promptVal.trim() !== "") {
+                tagsData[categoria].push(promptVal.trim());
                 renderTags();
                 await fetch('/api/guardar_tags', {
                     method: 'POST',
@@ -219,11 +219,13 @@ HTML_TEMPLATE = """
             alert(`🧪 SIMULACIÓN:\nEl próximo ticket le correspondería a: ${data.siguiente}`);
         }
 
-        // --- LÓGICA RULETA (3 OPCIONES EXACTAS Y PERFECTAMENTE CENTRADAS) ---
+        // --- OPCIONES Y COLORES DE LA RULETA (SIN TEXTO ADENTRO) ---
         const opcionesRuleta = [
-            { texto: "2X1 en chichas", emoji: "🔥", color: "#059669" },
-            { texto: "Preparate mates", emoji: "🧉", color: "#d97706" },
-            { texto: "A comprar jugo", emoji: "🧃", color: "#9a3412" }
+            { color: "#059669", texto: "🍻 PAGATE las chichas 2x1" },
+            { color: "#d97706", texto: "🧉 Prepara mates" },
+            { color: "#9a3412", texto: "🧃 Compra jugo para los teres" },
+            { color: "#2563eb", texto: "😎 Soy bautista" },
+            { color: "#dc2626", texto: "🌱 Cambia la yerba" }
         ];
 
         const canvas = document.getElementById("ruletaCanvas");
@@ -241,45 +243,21 @@ HTML_TEMPLATE = """
             for (let i = 0; i < numOpciones; i++) {
                 const angulo = anguloActual + i * arco;
                 
-                // Dibujar sector de la porción
+                // Dibujar sector de color puro sin letras
                 ctx.beginPath();
                 ctx.fillStyle = opcionesRuleta[i].color;
                 ctx.moveTo(radio, radio);
-                ctx.arc(radio, radio, radio - 6, angulo, angulo + arco);
+                ctx.arc(radio, radio, radio - 4, angulo, angulo + arco);
                 ctx.lineTo(radio, radio);
                 ctx.fill();
                 ctx.strokeStyle = "#ffffff";
-                ctx.lineWidth = 4;
+                ctx.lineWidth = 3;
                 ctx.stroke();
-
-                // Dibujar texto perfectamente centrado y legible
-                ctx.save();
-                ctx.translate(radio, radio);
-                const anguloMedio = angulo + arco / 2;
-                ctx.rotate(anguloMedio);
-
-                // Determinar si el texto queda boca abajo para rotarlo y mantenerlo legible
-                const anguloNormalizado = (anguloMedio % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-                const estaInv = anguloNormalizado > Math.PI / 2 && anguloNormalizado < 3 * Math.PI / 2;
-
-                if (estaInv) {
-                    ctx.rotate(Math.PI);
-                    ctx.textAlign = "right";
-                    ctx.translate(-radio + 75, 0);
-                } else {
-                    ctx.textAlign = "left";
-                    ctx.translate(radio - 135, 0);
-                }
-
-                ctx.fillStyle = "#ffffff";
-                ctx.font = "bold 13px 'Plus Jakarta Sans', sans-serif";
-                ctx.fillText(opcionesRuleta[i].emoji + " " + opcionesRuleta[i].texto, 0, 4);
-                ctx.restore();
             }
 
-            // Centro blanco con borde dorado para separar del texto
+            // Centro decorativo blanco con borde dorado
             ctx.beginPath();
-            ctx.arc(radio, radio, 32, 0, 2 * Math.PI);
+            ctx.arc(radio, radio, 26, 0, 2 * Math.PI);
             ctx.fillStyle = "#ffffff";
             ctx.fill();
             ctx.lineWidth = 4;
@@ -328,7 +306,7 @@ HTML_TEMPLATE = """
             
             const ganadora = opcionesRuleta[indiceGanador];
             const resDiv = document.getElementById("resultado-ruleta");
-            resDiv.textContent = `🎉 Resultado: ${ganadora.emoji} ${ganadora.texto}`;
+            resDiv.textContent = `🎉 Resultado: ${ganadora.texto}`;
             resDiv.classList.remove("hidden");
         }
 
