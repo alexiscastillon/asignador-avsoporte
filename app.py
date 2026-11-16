@@ -131,7 +131,7 @@ HTML_TEMPLATE = """
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="tags-container"></div>
         </div>
 
-        <!-- Ruleta de Prendas / Oficina (Debajo de todo) -->
+        <!-- Ruleta de la Oficina (3 Opciones Exactas) -->
         <div class="bg-white p-6 rounded-2xl border border-amber-100 card-shadow flex flex-col items-center space-y-4">
             <h2 class="text-lg font-extrabold text-slate-800">🎡 Ruleta de la Oficina (¡Probá tu suerte!)</h2>
             
@@ -219,14 +219,11 @@ HTML_TEMPLATE = """
             alert(`🧪 SIMULACIÓN:\nEl próximo ticket le correspondería a: ${data.siguiente}`);
         }
 
-        // --- LÓGICA RULETA NATIVA OPTIMIZADA Y LEGIBLE ---
+        // --- LÓGICA RULETA (EXACTAMENTE 3 OPCIONES, CENTRADAS Y CLARAS) ---
         const opcionesRuleta = [
-            { texto: "Preparate los mates", emoji: "🧉", color: "#d97706" },
             { texto: "2x1 en chichas", emoji: "🔥", color: "#059669" },
-            { texto: "Zafaste", emoji: "😎", color: "#2563eb" },
-            { texto: "A comprar jugos", emoji: "🧃", color: "#9a3412" },
-            { texto: "Café para todos", emoji: "☕", color: "#7c2d12" },
-            { texto: "Te comés el ticket", emoji: "🎫", color: "#dc2626" }
+            { texto: "Preparate los mates", emoji: "🧉", color: "#d97706" },
+            { texto: "A comprar jugo", emoji: "🧃", color: "#9a3412" }
         ];
 
         const canvas = document.getElementById("ruletaCanvas");
@@ -244,7 +241,7 @@ HTML_TEMPLATE = """
             for (let i = 0; i < numOpciones; i++) {
                 const angulo = anguloActual + i * arco;
                 
-                // Porción de la ruleta
+                // Dibujar sector
                 ctx.beginPath();
                 ctx.fillStyle = opcionesRuleta[i].color;
                 ctx.moveTo(radio, radio);
@@ -252,34 +249,35 @@ HTML_TEMPLATE = """
                 ctx.lineTo(radio, radio);
                 ctx.fill();
                 ctx.strokeStyle = "#ffffff";
-                ctx.lineWidth = 3;
+                ctx.lineWidth = 4;
                 ctx.stroke();
 
-                // Texto legible orientado correctamente
+                // Dibujar texto perfectamente centrado en el sector
                 ctx.save();
                 ctx.translate(radio, radio);
                 const anguloMedio = angulo + arco / 2;
                 ctx.rotate(anguloMedio);
 
-                // Si el texto queda hacia la izquierda, lo enderezamos para que nunca se lea al revés
-                if (anguloMedio > Math.PI / 2 && anguloMedio < 3 * Math.PI / 2) {
+                // Control para que el texto siempre se lea derecho
+                const anguloNormalizadoCentro = (anguloMedio % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+                if (anguloNormalizadoCentro > Math.PI / 2 && anguloNormalizadoCentro < 3 * Math.PI / 2) {
                     ctx.rotate(Math.PI);
                     ctx.textAlign = "left";
-                    ctx.translate(-radio + 40, 0);
+                    ctx.translate(-radio + 55, 0);
                 } else {
                     ctx.textAlign = "right";
-                    ctx.translate(radio - 40, 0);
+                    ctx.translate(radio - 55, 0);
                 }
 
                 ctx.fillStyle = "#ffffff";
-                ctx.font = "bold 13px 'Plus Jakarta Sans', sans-serif";
-                ctx.fillText(opcionesRuleta[i].emoji + " " + opcionesRuleta[i].texto, 0, 4);
+                ctx.font = "bold 14px 'Plus Jakarta Sans', sans-serif";
+                ctx.fillText(opcionesRuleta[i].emoji + " " + opcionesRuleta[i].texto, 0, 5);
                 ctx.restore();
             }
 
-            // Circulo central decorativo
+            // Centro decorativo
             ctx.beginPath();
-            ctx.arc(radio, radio, 22, 0, 2 * Math.PI);
+            ctx.arc(radio, radio, 26, 0, 2 * Math.PI);
             ctx.fillStyle = "#ffffff";
             ctx.fill();
             ctx.lineWidth = 4;
@@ -293,8 +291,9 @@ HTML_TEMPLATE = """
             const resDiv = document.getElementById("resultado-ruleta");
             resDiv.classList.add("hidden");
 
-            const vueltasExtra = Math.floor(Math.random() * 5 + 5) * 2 * Math.PI;
-            const anguloDestino = anguloActual + vueltasExtra + Math.random() * 2 * Math.PI;
+            const vueltasCompletas = (Math.floor(Math.random() * 5) + 6) * 2 * Math.PI;
+            const anguloDestino = anguloActual + vueltasCompletas + (Math.random() * 2 * Math.PI);
+            
             const duracion = 4000;
             const inicio = performance.now();
             const anguloInicial = anguloActual;
@@ -320,8 +319,10 @@ HTML_TEMPLATE = """
         function calcularGanador() {
             const numOpciones = opcionesRuleta.length;
             const arco = (2 * Math.PI) / numOpciones;
-            const anguloNormalizado = (1.5 * Math.PI - (anguloActual % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-            const indiceGanador = Math.floor(anguloNormalizado / arco);
+            
+            const anguloMod = (anguloActual % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+            const puntero = (1.5 * Math.PI - anguloMod + 2 * Math.PI) % (2 * Math.PI);
+            const indiceGanador = Math.floor(puntero / arco) % numOpciones;
             
             const ganadora = opcionesRuleta[indiceGanador];
             const resDiv = document.getElementById("resultado-ruleta");
@@ -332,7 +333,7 @@ HTML_TEMPLATE = """
         dibujarRuleta();
         renderTags();
         
-        // Refresco automático cada 10 minutos (600.000 ms) para ahorrar datos
+        // Refresco automático cada 10 minutos (600.000 ms)
         setInterval(() => location.reload(), 600000);
     </script>
 </body>
@@ -349,7 +350,7 @@ def api_guardar_foto():
     estado = obtener_estado_nube()
     estado['fotos'][data['nombre']] = data['foto']
     guardar_estado_nube(estado)
-    return jsonify({"success": true})
+    return jsonify({"success": True})
 
 @app.route('/api/guardar_tags', methods=['POST'])
 def api_guardar_tags():
